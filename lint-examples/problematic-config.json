@@ -1,0 +1,49 @@
+{
+  "port": 80,
+  "protocol": "http",
+  "stubs": [
+    {
+      "predicates": [
+        { "matches": { "path": "[invalid(regex" } }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 999,
+            "headers": {
+              "Content-Length": 5,
+              "X-Custom": null
+            },
+            "body": "test"
+          }
+        }
+      ]
+    },
+    {
+      "predicates": [
+        { "unknownOperator": { "path": "/test" } }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "body": "test"
+          }
+        }
+      ]
+    },
+    {
+      "predicates": [
+        { "equals": { "path": "/proxy" } }
+      ],
+      "responses": [
+        {
+          "proxy": {
+            "to": "not-a-valid-url",
+            "mode": "invalidMode"
+          }
+        }
+      ]
+    }
+  ]
+}

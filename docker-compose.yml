@@ -1,0 +1,61 @@
+services:
+  # Rift - High Performance Mock Server
+  rift:
+    image: zainalpour/rift-proxy:latest
+    container_name: rift-demo
+    ports:
+      - "2525:2525"      # Admin API
+      - "4545:4545"      # JSONPath benchmark
+      - "4546:4546"      # DeepEquals benchmark
+      - "4547:4547"      # Regex benchmark
+      - "4548:4548"      # Extreme benchmark
+      - "5555:5555"      # Recording proxy
+      - "8114:8114"      # Appointment create
+      - "8348:8348"      # Feature toggle
+      - "9100:9100"      # Sales lead
+      - "9489:9489"      # Staff schedules
+      - "9505:9505"      # Appointment search
+    volumes:
+      - ./imposters:/imposters:ro
+    command: ["--datadir", "/imposters", "--port", "2525", "--loglevel", "info"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2525/imposters"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # Mountebank - Original Mock Server (for comparison)
+  mountebank:
+    image: bbyars/mountebank:2.9.1
+    container_name: mountebank-demo
+    ports:
+      - "3525:2525"       # Admin API (different host port)
+      - "14545:4545"      # JSONPath benchmark (offset +10000)
+      - "14546:4546"      # DeepEquals benchmark
+      - "14547:4547"      # Regex benchmark
+      - "14548:4548"      # Extreme benchmark
+      - "18114:8114"      # Appointment create (offset +10000)
+    volumes:
+      - ./imposters:/imposters:ro
+    command: ["--configfile", "/imposters/euphoria_Appointment_v1_createAppointment_imposter.json", "--allowInjection", "--loglevel", "info"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2525/imposters"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # Echo Server - For proxy recording demo
+  echo:
+    image: python:3.11-slim
+    container_name: echo-server
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./echo-server:/app:ro
+    working_dir: /app
+    command: ["python3", "echo.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

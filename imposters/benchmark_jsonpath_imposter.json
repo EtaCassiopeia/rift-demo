@@ -1,0 +1,81 @@
+{
+  "port": 4545,
+  "protocol": "http",
+  "name": "JSONPath Benchmark",
+  "stubs": [
+    {
+      "predicates": [
+        {
+          "jsonpath": {
+            "selector": "$.user.profile.settings.preferences.theme"
+          },
+          "equals": {
+            "body": "dark"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"found\", \"theme\": \"dark\"}"
+          }
+        }
+      ]
+    },
+    {
+      "predicates": [
+        {
+          "jsonpath": {
+            "selector": "$.items[*].metadata.tags[?(@.priority=='high')].name"
+          },
+          "exists": {
+            "body": true
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"high_priority_found\"}"
+          }
+        }
+      ]
+    },
+    {
+      "predicates": [
+        {
+          "jsonpath": {
+            "selector": "$.orders[0].items[?(@.price > 100)].name"
+          },
+          "exists": {
+            "body": true
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"expensive_items_found\"}"
+          }
+        }
+      ]
+    },
+    {
+      "responses": [
+        {
+          "is": {
+            "statusCode": 404,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"no_match\"}"
+          }
+        }
+      ]
+    }
+  ]
+}

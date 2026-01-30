@@ -1,0 +1,66 @@
+{
+  "port": 4546,
+  "protocol": "http",
+  "name": "DeepEquals Benchmark",
+  "stubs": [
+    {
+      "predicates": [
+        {
+          "deepEquals": {
+            "body": {
+              "user": {
+                "id": 12345,
+                "profile": {
+                  "firstName": "John",
+                  "lastName": "Doe",
+                  "email": "john.doe@example.com",
+                  "addresses": [
+                    {
+                      "type": "home",
+                      "street": "123 Main St",
+                      "city": "Springfield",
+                      "state": "IL",
+                      "zip": "62701"
+                    },
+                    {
+                      "type": "work",
+                      "street": "456 Office Blvd",
+                      "city": "Chicago",
+                      "state": "IL",
+                      "zip": "60601"
+                    }
+                  ],
+                  "preferences": {
+                    "notifications": true,
+                    "theme": "dark",
+                    "language": "en-US"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"deep_match_success\"}"
+          }
+        }
+      ]
+    },
+    {
+      "responses": [
+        {
+          "is": {
+            "statusCode": 404,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"no_match\"}"
+          }
+        }
+      ]
+    }
+  ]
+}

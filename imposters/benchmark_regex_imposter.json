@@ -1,0 +1,59 @@
+{
+  "port": 4547,
+  "protocol": "http",
+  "name": "Regex Benchmark",
+  "stubs": [
+    {
+      "predicates": [
+        {
+          "matches": {
+            "path": "^/api/v[0-9]+/users/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+          }
+        },
+        {
+          "matches": {
+            "body": "\"email\":\\s*\"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\""
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"regex_match_success\"}"
+          }
+        }
+      ]
+    },
+    {
+      "predicates": [
+        {
+          "matches": {
+            "body": "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\\b"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"card_number_found\"}"
+          }
+        }
+      ]
+    },
+    {
+      "responses": [
+        {
+          "is": {
+            "statusCode": 404,
+            "headers": { "Content-Type": "application/json" },
+            "body": "{\"status\": \"no_match\"}"
+          }
+        }
+      ]
+    }
+  ]
+}
