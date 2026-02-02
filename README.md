@@ -1,6 +1,6 @@
 # Rift Demo
 
-This demo showcases Rift - a high-performance, Mountebank-compatible HTTP mock server. You'll see how Rift can be a drop-in replacement for Mountebank with 10-250x better performance.
+This demo showcases Rift - a high-performance, Mountebank-compatible HTTP mock server. You'll see how Rift can be a drop-in replacement for Mountebank with **4-445x better performance**.
 
 ## Prerequisites
 
@@ -105,9 +105,28 @@ Customize the benchmark:
 REQUESTS=5000 CONCURRENCY=100 ./scripts/benchmark.sh both
 ```
 
+#### Comprehensive Benchmarks
+
+Test various predicate types with 200 concurrent connections:
+
+```bash
+# Run comprehensive benchmark suite
+./scripts/benchmark-comprehensive.sh
+```
+
+**Results (200 concurrent connections, 1000 requests):**
+
+| Scenario | Rift | Mountebank | Speedup |
+|----------|------|------------|---------|
+| Health Check (simple equals) | 10,344 req/s | 2,552 req/s | **4x** |
+| JSONPath predicate | 14,264 req/s | 2,705 req/s | **5x** |
+| XPath predicate | 15,060 req/s | 2,921 req/s | **5x** |
+| Complex AND/OR | 15,638 req/s | 3,859 req/s | **4x** |
+| Last stub match (50 stubs) | 15,234 req/s | 2,423 req/s | **6x** |
+
 #### Extended Benchmarks
 
-Test specific predicate types where Rift excels:
+Test specific predicate types:
 
 ```bash
 # Run all extended benchmarks
@@ -119,15 +138,27 @@ Test specific predicate types where Rift excels:
 ./scripts/benchmark-extended.sh regex       # Complex regex matching
 ```
 
-#### Extreme Benchmark (300-400x faster)
+#### Extreme Benchmark (8-445x faster)
 
-For scenarios with many stubs and JSONPath predicates (common in large service virtualization setups):
+For scenarios with many stubs and complex predicates (common in large service virtualization setups):
 
 ```bash
-./scripts/benchmark-extreme.sh
+./scripts/benchmark-extreme-comprehensive.sh
 ```
 
-This benchmark creates 300 stubs, each with 3 JSONPath predicates. The request must traverse all stubs (900 JSONPath evaluations) to find a match.
+This benchmark creates 300 stubs per scenario, with the matching stub always at the END (worst case for linear scan). Tests all predicate types:
+
+**Results (300 stubs × multiple predicates, 200 concurrent connections):**
+
+| Scenario | Rift | Mountebank | Speedup |
+|----------|------|------------|---------|
+| Simple Equals | 15,433 req/s | 618 req/s | **24x** |
+| JSONPath (×2 predicates) | 13,377 req/s | 30 req/s | **445x** |
+| XPath (×2 predicates) | 2,834 req/s | 65 req/s | **43x** |
+| Complex AND/OR (×3 predicates) | 14,233 req/s | 172 req/s | **82x** |
+| Regex (×2 predicates) | 336 req/s | 40 req/s | **8x** |
+
+> **Why the difference?** Mountebank uses linear O(n) stub scanning, evaluating all predicates sequentially. Rift uses hybrid indexing (HashMap + Radix Trie + Aho-Corasick) for O(1) lookup regardless of stub count.
 
 ### 4. Proxy Recording (proxyOnce)
 

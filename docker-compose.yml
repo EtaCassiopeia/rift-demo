@@ -10,6 +10,8 @@ services:
       - "4547:4547"      # Regex benchmark
       - "4548:4548"      # Extreme benchmark
       - "5555:5555"      # Recording proxy
+      - "6001-6010:6001-6010"  # Comprehensive benchmarks
+      - "7001-7010:7001-7010"  # Extreme comprehensive benchmarks
       - "8114:8114"      # Appointment create
       - "8348:8348"      # Feature toggle
       - "9100:9100"      # Sales lead
@@ -34,6 +36,8 @@ services:
       - "14546:4546"      # DeepEquals benchmark
       - "14547:4547"      # Regex benchmark
       - "14548:4548"      # Extreme benchmark
+      - "16001-16010:6001-6010"  # Comprehensive benchmarks (offset +10000)
+      - "17001-17010:7001-7010"  # Extreme comprehensive benchmarks
       - "18114:8114"      # Appointment create (offset +10000)
     volumes:
       - ./imposters:/imposters:ro
