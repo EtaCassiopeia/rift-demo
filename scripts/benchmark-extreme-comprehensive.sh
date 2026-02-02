@@ -119,45 +119,104 @@ generate_stubs_regex() {
 
 setup_imposters() {
     echo ""
+    echo -e "${CYAN}Cleaning up existing imposters...${NC}"
+    for port in 7001 7002 7003 7004 7005; do
+        curl -s -X DELETE "$RIFT_ADMIN/imposters/$port" > /dev/null 2>&1 || true
+        curl -s -X DELETE "$MB_ADMIN/imposters/$port" > /dev/null 2>&1 || true
+    done
+    sleep 1
+
     echo -e "${CYAN}Setting up imposters with $STUBS stubs each...${NC}"
     echo ""
 
     # 1. Simple
     echo -n "  1. Simple equals ($STUBS stubs)... "
     local simple_stubs=$(generate_stubs_simple $STUBS "/health")
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}" > /dev/null
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    local rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}")
+    local mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # 2. JSONPath
     echo -n "  2. JSONPath ($STUBS stubs × 2 predicates)... "
     local jsonpath_stubs=$(generate_stubs_jsonpath $STUBS)
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}" > /dev/null
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # 3. XPath
     echo -n "  3. XPath ($STUBS stubs × 2 predicates)... "
     local xpath_stubs=$(generate_stubs_xpath $STUBS)
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}" > /dev/null
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # 4. Complex AND/OR
     echo -n "  4. Complex AND/OR ($STUBS stubs × 3 predicates)... "
     local complex_stubs=$(generate_stubs_complex $STUBS)
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}" > /dev/null
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # 5. Regex
     echo -n "  5. Regex ($STUBS stubs × 2 predicates)... "
     local regex_stubs=$(generate_stubs_regex $STUBS)
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}" > /dev/null
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     echo -e "${GREEN}All imposters created${NC}"
+
+    # Verify imposters are responding
+    echo ""
+    echo -e "${CYAN}Verifying imposters respond...${NC}"
+    sleep 1
+    local all_ok=true
+    echo -n "  Rift ports 7001-7005: "
+    for port in 7001 7002 7003 7004 7005; do
+        local code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://127.0.0.1:$port/health" 2>/dev/null)
+        if [ "$code" != "200" ]; then
+            echo -e "${RED}Port $port FAILED (HTTP $code)${NC}"
+            all_ok=false
+            break
+        fi
+    done
+    if [ "$all_ok" = true ]; then
+        echo -e "${GREEN}OK${NC}"
+    fi
+
+    all_ok=true
+    echo -n "  Mountebank ports 17001-17005: "
+    for port in 17001 17002 17003 17004 17005; do
+        local code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://127.0.0.1:$port/health" 2>/dev/null)
+        if [ "$code" != "200" ]; then
+            echo -e "${RED}Port $port FAILED (HTTP $code)${NC}"
+            all_ok=false
+            break
+        fi
+    done
+    if [ "$all_ok" = true ]; then
+        echo -e "${GREEN}OK${NC}"
+    fi
 }
 
 cleanup_imposters() {
