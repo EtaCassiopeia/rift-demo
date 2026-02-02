@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Extreme Comprehensive Benchmark - All scenarios with 300+ stubs
 # Shows the dramatic performance difference when many stubs must be traversed
-# Usage: ./benchmark-extreme-comprehensive.sh
+# Usage: ./benchmark-extreme-comprehensive.sh [--no-color]
 
 set -e
 
@@ -18,14 +18,26 @@ CONCURRENCY=${CONCURRENCY:-200}
 # MB_REQUESTS must be >= CONCURRENCY (ab requirement)
 MB_REQUESTS=${MB_REQUESTS:-$CONCURRENCY}
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# Check for --no-color flag
+NO_COLOR=false
+for arg in "$@"; do
+    if [ "$arg" = "--no-color" ]; then
+        NO_COLOR=true
+    fi
+done
+
+# Colors (disabled with --no-color flag)
+if [ "$NO_COLOR" = true ]; then
+    RED='' GREEN='' BLUE='' YELLOW='' CYAN='' BOLD='' NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+fi
 
 # Results storage
 SIMPLE_RIFT="" SIMPLE_MB="" SIMPLE_SPEEDUP=""
@@ -175,73 +187,128 @@ run_all_benchmarks() {
     print_header "1. SIMPLE EQUALS ($STUBS stubs)"
     echo "Match at stub #$STUBS (worst case linear scan)"
     echo ""
-    echo -n "  Rift ($REQUESTS requests)... "
-    SIMPLE_RIFT=$(ab -n $REQUESTS -c $CONCURRENCY "http://127.0.0.1:7001/health" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${GREEN}$SIMPLE_RIFT req/sec${NC}"
-    echo -n "  Mountebank ($MB_REQUESTS requests)... "
-    SIMPLE_MB=$(ab -n $MB_REQUESTS -c $CONCURRENCY "http://127.0.0.1:17001/health" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${YELLOW}$SIMPLE_MB req/sec${NC}"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    local rift_out=$(ab -n $REQUESTS -c $CONCURRENCY "http://127.0.0.1:7001/health" 2>&1)
+    SIMPLE_RIFT=$(echo "$rift_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    local rift_latency=$(echo "$rift_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    local rift_failed=$(echo "$rift_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$SIMPLE_RIFT${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${rift_failed:-0}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($MB_REQUESTS requests, $CONCURRENCY concurrent):"
+    local mb_out=$(ab -n $MB_REQUESTS -c $CONCURRENCY "http://127.0.0.1:17001/health" 2>&1)
+    SIMPLE_MB=$(echo "$mb_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    local mb_latency=$(echo "$mb_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    local mb_failed=$(echo "$mb_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${YELLOW}$SIMPLE_MB${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${mb_failed:-0}"
     if [ -n "$SIMPLE_RIFT" ] && [ -n "$SIMPLE_MB" ] && [ "$SIMPLE_MB" -gt 0 ] 2>/dev/null; then
         SIMPLE_SPEEDUP=$((SIMPLE_RIFT / SIMPLE_MB))
-        echo -e "  ${CYAN}Speedup: ${GREEN}${BOLD}${SIMPLE_SPEEDUP}x faster${NC}"
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${SIMPLE_SPEEDUP}x faster${NC}"
     fi
 
     # 2. JSONPath
     print_header "2. JSONPATH ($STUBS stubs × 2 predicates = $((STUBS * 2)) evals)"
     echo ""
-    echo -n "  Rift ($REQUESTS requests)... "
-    JSONPATH_RIFT=$(ab -n $REQUESTS -c $CONCURRENCY -p "$jsonpath_body" -T "application/json" "http://127.0.0.1:7002/" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${GREEN}$JSONPATH_RIFT req/sec${NC}"
-    echo -n "  Mountebank ($MB_REQUESTS requests)... "
-    JSONPATH_MB=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$jsonpath_body" -T "application/json" "http://127.0.0.1:17002/" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${YELLOW}$JSONPATH_MB req/sec${NC}"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_out=$(ab -n $REQUESTS -c $CONCURRENCY -p "$jsonpath_body" -T "application/json" "http://127.0.0.1:7002/" 2>&1)
+    JSONPATH_RIFT=$(echo "$rift_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    rift_latency=$(echo "$rift_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    rift_failed=$(echo "$rift_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$JSONPATH_RIFT${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${rift_failed:-0}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($MB_REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_out=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$jsonpath_body" -T "application/json" "http://127.0.0.1:17002/" 2>&1)
+    JSONPATH_MB=$(echo "$mb_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    mb_latency=$(echo "$mb_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    mb_failed=$(echo "$mb_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${YELLOW}$JSONPATH_MB${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${mb_failed:-0}"
     if [ -n "$JSONPATH_RIFT" ] && [ -n "$JSONPATH_MB" ] && [ "$JSONPATH_MB" -gt 0 ] 2>/dev/null; then
         JSONPATH_SPEEDUP=$((JSONPATH_RIFT / JSONPATH_MB))
-        echo -e "  ${CYAN}Speedup: ${GREEN}${BOLD}${JSONPATH_SPEEDUP}x faster${NC}"
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${JSONPATH_SPEEDUP}x faster${NC}"
     fi
 
     # 3. XPath
     print_header "3. XPATH ($STUBS stubs × 2 predicates = $((STUBS * 2)) evals)"
     echo ""
-    echo -n "  Rift ($REQUESTS requests)... "
-    XPATH_RIFT=$(ab -n $REQUESTS -c $CONCURRENCY -p "$xpath_body" -T "application/xml" "http://127.0.0.1:7003/" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${GREEN}$XPATH_RIFT req/sec${NC}"
-    echo -n "  Mountebank ($MB_REQUESTS requests)... "
-    XPATH_MB=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$xpath_body" -T "application/xml" "http://127.0.0.1:17003/" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${YELLOW}$XPATH_MB req/sec${NC}"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_out=$(ab -n $REQUESTS -c $CONCURRENCY -p "$xpath_body" -T "application/xml" "http://127.0.0.1:7003/" 2>&1)
+    XPATH_RIFT=$(echo "$rift_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    rift_latency=$(echo "$rift_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    rift_failed=$(echo "$rift_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$XPATH_RIFT${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${rift_failed:-0}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($MB_REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_out=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$xpath_body" -T "application/xml" "http://127.0.0.1:17003/" 2>&1)
+    XPATH_MB=$(echo "$mb_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    mb_latency=$(echo "$mb_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    mb_failed=$(echo "$mb_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${YELLOW}$XPATH_MB${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${mb_failed:-0}"
     if [ -n "$XPATH_RIFT" ] && [ -n "$XPATH_MB" ] && [ "$XPATH_MB" -gt 0 ] 2>/dev/null; then
         XPATH_SPEEDUP=$((XPATH_RIFT / XPATH_MB))
-        echo -e "  ${CYAN}Speedup: ${GREEN}${BOLD}${XPATH_SPEEDUP}x faster${NC}"
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${XPATH_SPEEDUP}x faster${NC}"
     fi
 
     # 4. Complex AND/OR
     print_header "4. COMPLEX AND/OR ($STUBS stubs × 3 predicates)"
     echo "Nested: AND(method, OR(path), OR(body), exists(header))"
     echo ""
-    echo -n "  Rift ($REQUESTS requests)... "
-    COMPLEX_RIFT=$(ab -n $REQUESTS -c $CONCURRENCY -p "$complex_body" -T "application/json" -H "Authorization: Bearer token" "http://127.0.0.1:7004/api/v1/test" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${GREEN}$COMPLEX_RIFT req/sec${NC}"
-    echo -n "  Mountebank ($MB_REQUESTS requests)... "
-    COMPLEX_MB=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$complex_body" -T "application/json" -H "Authorization: Bearer token" "http://127.0.0.1:17004/api/v1/test" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${YELLOW}$COMPLEX_MB req/sec${NC}"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_out=$(ab -n $REQUESTS -c $CONCURRENCY -p "$complex_body" -T "application/json" -H "Authorization: Bearer token" "http://127.0.0.1:7004/api/v1/test" 2>&1)
+    COMPLEX_RIFT=$(echo "$rift_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    rift_latency=$(echo "$rift_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    rift_failed=$(echo "$rift_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$COMPLEX_RIFT${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${rift_failed:-0}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($MB_REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_out=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$complex_body" -T "application/json" -H "Authorization: Bearer token" "http://127.0.0.1:17004/api/v1/test" 2>&1)
+    COMPLEX_MB=$(echo "$mb_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    mb_latency=$(echo "$mb_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    mb_failed=$(echo "$mb_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${YELLOW}$COMPLEX_MB${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${mb_failed:-0}"
     if [ -n "$COMPLEX_RIFT" ] && [ -n "$COMPLEX_MB" ] && [ "$COMPLEX_MB" -gt 0 ] 2>/dev/null; then
         COMPLEX_SPEEDUP=$((COMPLEX_RIFT / COMPLEX_MB))
-        echo -e "  ${CYAN}Speedup: ${GREEN}${BOLD}${COMPLEX_SPEEDUP}x faster${NC}"
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${COMPLEX_SPEEDUP}x faster${NC}"
     fi
 
     # 5. Regex
     print_header "5. REGEX ($STUBS stubs × 2 predicates)"
     echo "Complex patterns: UUID path + email body"
     echo ""
-    echo -n "  Rift ($REQUESTS requests)... "
-    REGEX_RIFT=$(ab -n $REQUESTS -c $CONCURRENCY -p "$regex_body" -T "application/json" "http://127.0.0.1:7005/api/v1/users/550e8400-e29b-41d4-a716-446655440000" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${GREEN}$REGEX_RIFT req/sec${NC}"
-    echo -n "  Mountebank ($MB_REQUESTS requests)... "
-    REGEX_MB=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$regex_body" -T "application/json" "http://127.0.0.1:17005/api/v1/users/550e8400-e29b-41d4-a716-446655440000" 2>&1 | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    echo -e "${YELLOW}$REGEX_MB req/sec${NC}"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_out=$(ab -n $REQUESTS -c $CONCURRENCY -p "$regex_body" -T "application/json" "http://127.0.0.1:7005/api/v1/users/550e8400-e29b-41d4-a716-446655440000" 2>&1)
+    REGEX_RIFT=$(echo "$rift_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    rift_latency=$(echo "$rift_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    rift_failed=$(echo "$rift_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$REGEX_RIFT${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${rift_failed:-0}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($MB_REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_out=$(ab -n $MB_REQUESTS -c $CONCURRENCY -p "$regex_body" -T "application/json" "http://127.0.0.1:17005/api/v1/users/550e8400-e29b-41d4-a716-446655440000" 2>&1)
+    REGEX_MB=$(echo "$mb_out" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
+    mb_latency=$(echo "$mb_out" | grep "Time per request" | head -1 | awk '{print $4}')
+    mb_failed=$(echo "$mb_out" | grep "Failed requests" | awk '{print $3}')
+    echo -e "    Requests/sec: ${YELLOW}$REGEX_MB${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC} (mean)"
+    echo -e "    Failed:       ${mb_failed:-0}"
     if [ -n "$REGEX_RIFT" ] && [ -n "$REGEX_MB" ] && [ "$REGEX_MB" -gt 0 ] 2>/dev/null; then
         REGEX_SPEEDUP=$((REGEX_RIFT / REGEX_MB))
-        echo -e "  ${CYAN}Speedup: ${GREEN}${BOLD}${REGEX_SPEEDUP}x faster${NC}"
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${REGEX_SPEEDUP}x faster${NC}"
     fi
 
     rm -f "$jsonpath_body" "$xpath_body" "$complex_body" "$regex_body"
