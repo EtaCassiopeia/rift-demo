@@ -1,6 +1,7 @@
 #!/bin/bash
 # Extreme benchmark showing 400x+ performance difference
 # This demonstrates Rift's advantage with many stubs + JSONPath predicates
+# Usage: ./benchmark-extreme.sh [--no-color]
 
 set -e
 
@@ -13,14 +14,26 @@ REQUESTS=${REQUESTS:-3000}
 CONCURRENCY=${CONCURRENCY:-100}
 STUBS=${STUBS:-300}
 
+# Check for --no-color flag
+NO_COLOR=false
+for arg in "$@"; do
+    if [ "$arg" = "--no-color" ]; then
+        NO_COLOR=true
+    fi
+done
+
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+if [ "$NO_COLOR" = true ]; then
+    RED='' GREEN='' BLUE='' YELLOW='' CYAN='' BOLD='' NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+fi
 
 print_header() {
     echo ""
@@ -39,12 +52,11 @@ check_ab() {
 
 generate_stubs() {
     local count=$1
-    local stubs='['
+    local stubs=""
     for i in $(seq 1 $((count - 1))); do
-        stubs+='{"predicates":[{"jsonpath":{"selector":"$.id"},"equals":{"body":"nm'$i'"}},{"jsonpath":{"selector":"$.type"},"equals":{"body":"w"}},{"jsonpath":{"selector":"$.code"},"equals":{"body":"b"}}],"responses":[{"is":{"statusCode":200,"body":"s'$i'"}}]},'
+        stubs="$stubs{\"predicates\":[{\"jsonpath\":{\"selector\":\"\$.id\"},\"equals\":{\"body\":\"nm$i\"}},{\"jsonpath\":{\"selector\":\"\$.type\"},\"equals\":{\"body\":\"w\"}},{\"jsonpath\":{\"selector\":\"\$.code\"},\"equals\":{\"body\":\"b\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"s$i\"}}]},"
     done
-    stubs+='{"predicates":[{"jsonpath":{"selector":"$.id"},"equals":{"body":"target"}},{"jsonpath":{"selector":"$.type"},"equals":{"body":"valid"}},{"jsonpath":{"selector":"$.code"},"equals":{"body":"OK"}}],"responses":[{"is":{"statusCode":200,"body":"found"}}]}'
-    stubs+=']'
+    stubs="$stubs{\"predicates\":[{\"jsonpath\":{\"selector\":\"\$.id\"},\"equals\":{\"body\":\"target\"}},{\"jsonpath\":{\"selector\":\"\$.type\"},\"equals\":{\"body\":\"valid\"}},{\"jsonpath\":{\"selector\":\"\$.code\"},\"equals\":{\"body\":\"OK\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"found\"}}]}"
     echo "$stubs"
 }
 
@@ -52,18 +64,25 @@ setup_imposters() {
     echo "Generating $STUBS stubs with 3 JSONPath predicates each..."
 
     local stubs=$(generate_stubs $STUBS)
+    local tmpfile="/tmp/extreme_imposter_$$.json"
 
     # Setup on Rift
     curl -s -X DELETE "$RIFT_ADMIN/imposters/$RIFT_PORT" > /dev/null 2>&1 || true
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" \
-        -d '{"port":'$RIFT_PORT',"protocol":"http","name":"Extreme Benchmark","stubs":'"$stubs"'}' > /dev/null
+    echo "{\"port\":$RIFT_PORT,\"protocol\":\"http\",\"name\":\"Extreme Benchmark\",\"stubs\":[$stubs]}" > "$tmpfile"
+    local rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
 
     # Setup on Mountebank
     curl -s -X DELETE "$MB_ADMIN/imposters/$RIFT_PORT" > /dev/null 2>&1 || true
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" \
-        -d '{"port":'$RIFT_PORT',"protocol":"http","name":"Extreme Benchmark","stubs":'"$stubs"'}' > /dev/null
+    local mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
 
-    echo -e "${GREEN}Imposters created with $STUBS stubs${NC}"
+    rm -f "$tmpfile"
+
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}Imposters created with $STUBS stubs${NC}"
+    else
+        echo -e "${RED}Failed to create imposters (Rift: $rift_resp, MB: $mb_resp)${NC}"
+        exit 1
+    fi
 }
 
 run_benchmark() {
@@ -74,8 +93,9 @@ run_benchmark() {
     local result=$(ab -n $requests -c $CONCURRENCY -p /tmp/extreme_body.json -T "application/json" "$url" 2>&1)
     local rps=$(echo "$result" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
     local failed=$(echo "$result" | grep "Failed requests" | awk '{print $3}')
+    local latency=$(echo "$result" | grep "Time per request" | head -1 | awk '{print $4}')
 
-    echo "$rps|$failed"
+    echo "$rps|$failed|$latency"
 }
 
 print_header "EXTREME PERFORMANCE BENCHMARK"
@@ -114,21 +134,28 @@ echo '{"id":"target","type":"valid","code":"OK"}' > /tmp/extreme_body.json
 print_header "RUNNING BENCHMARK"
 echo ""
 
-echo -n "Benchmarking Rift ($REQUESTS requests)... "
+echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
 rift_result=$(run_benchmark "rift" "http://127.0.0.1:$RIFT_PORT/" $REQUESTS)
 rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
 rift_failed=$(echo "$rift_result" | cut -d'|' -f2)
-echo -e "${GREEN}$rift_rps req/sec${NC} (failed: $rift_failed)"
+rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
+echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
+echo -e "    Failed:       $rift_failed"
 
 # Use fewer requests for Mountebank since it's much slower
 mb_requests=$((REQUESTS / 10))
-if [ $mb_requests -lt 100 ]; then mb_requests=100; fi
+if [ $mb_requests -lt $CONCURRENCY ]; then mb_requests=$CONCURRENCY; fi
 
-echo -n "Benchmarking Mountebank ($mb_requests requests)... "
+echo ""
+echo -e "  ${BOLD}Mountebank${NC} ($mb_requests requests, $CONCURRENCY concurrent):"
 mb_result=$(run_benchmark "mb" "http://127.0.0.1:$MB_PORT/" $mb_requests)
 mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
 mb_failed=$(echo "$mb_result" | cut -d'|' -f2)
-echo -e "${YELLOW}$mb_rps req/sec${NC} (failed: $mb_failed)"
+mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
+echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
+echo -e "    Failed:       $mb_failed"
 
 print_header "RESULTS"
 echo ""
@@ -138,12 +165,12 @@ if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; th
 
     echo "┌─────────────────────────────────────────────────────┐"
     echo "│                                                     │"
-    printf "│  ${GREEN}Rift:${NC}        %6s req/sec                       │\n" "$rift_rps"
-    printf "│  ${YELLOW}Mountebank:${NC}  %6s req/sec                       │\n" "$mb_rps"
+    printf "│  Rift:        %6s req/sec                       │\n" "$rift_rps"
+    printf "│  Mountebank:  %6s req/sec                       │\n" "$mb_rps"
     echo "│                                                     │"
     echo "├─────────────────────────────────────────────────────┤"
     echo "│                                                     │"
-    printf "│  ${BOLD}Speedup:     ${GREEN}%3dx faster${NC}                          │\n" "$speedup"
+    printf "│  Speedup:     %3dx faster                          │\n" "$speedup"
     echo "│                                                     │"
     echo "└─────────────────────────────────────────────────────┘"
     echo ""
@@ -153,3 +180,9 @@ fi
 
 echo ""
 rm -f /tmp/extreme_body.json
+
+# Cleanup
+curl -s -X DELETE "$RIFT_ADMIN/imposters/$RIFT_PORT" > /dev/null 2>&1 || true
+curl -s -X DELETE "$MB_ADMIN/imposters/$RIFT_PORT" > /dev/null 2>&1 || true
+
+echo -e "${GREEN}Benchmark complete!${NC}"

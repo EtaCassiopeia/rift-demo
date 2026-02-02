@@ -1,7 +1,7 @@
 #!/bin/bash
 # Comprehensive benchmark comparing Rift vs Mountebank
 # Tests: health check, JSONPath, XPath, complex AND/OR, last-stub-match (50 stubs)
-# Usage: ./benchmark-comprehensive.sh
+# Usage: ./benchmark-comprehensive.sh [--no-color]
 
 set -e
 
@@ -14,13 +14,26 @@ MB_ADMIN="http://127.0.0.1:3525"
 REQUESTS=${REQUESTS:-1000}
 CONCURRENCY=${CONCURRENCY:-200}
 
+# Check for --no-color flag
+NO_COLOR=false
+for arg in "$@"; do
+    if [ "$arg" = "--no-color" ]; then
+        NO_COLOR=true
+    fi
+done
+
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+if [ "$NO_COLOR" = true ]; then
+    RED='' GREEN='' BLUE='' YELLOW='' CYAN='' BOLD='' NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+fi
 
 print_header() {
     echo ""
@@ -35,6 +48,17 @@ check_ab() {
         echo "Install with: brew install httpd (macOS) or apt install apache2-utils (Linux)"
         exit 1
     fi
+}
+
+# Helper to create imposter using temp file (avoids shell escaping issues)
+create_imposter() {
+    local admin_url=$1
+    local json=$2
+    local tmpfile="/tmp/imposter_$$.json"
+    echo "$json" > "$tmpfile"
+    local resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$admin_url/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    rm -f "$tmpfile"
+    echo "$resp"
 }
 
 run_benchmark() {
@@ -54,10 +78,17 @@ run_benchmark() {
     local rps=$(echo "$result" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
     local failed=$(echo "$result" | grep "Failed requests" | awk '{print $3}')
     local mean_latency=$(echo "$result" | grep "Time per request:" | head -1 | awk '{print $4}')
-    local p50=$(echo "$result" | grep "50%" | awk '{print $2}')
-    local p99=$(echo "$result" | grep "99%" | awk '{print $2}')
 
-    echo "$rps|$failed|$mean_latency|$p50|$p99"
+    echo "$rps|$failed|$mean_latency"
+}
+
+cleanup_imposters() {
+    echo "Cleaning up existing imposters..."
+    for port in 6001 6002 6003 6004 6005; do
+        curl -s -X DELETE "$RIFT_ADMIN/imposters/$port" > /dev/null 2>&1 || true
+        curl -s -X DELETE "$MB_ADMIN/imposters/$port" > /dev/null 2>&1 || true
+    done
+    sleep 1
 }
 
 setup_imposters() {
@@ -65,431 +96,255 @@ setup_imposters() {
 
     # ========== 1. Simple Health Check (port 6001/16001) ==========
     echo -n "  Creating health check imposter... "
-
-    # Rift
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6001,
-        "protocol": "http",
-        "name": "Health Check",
-        "stubs": [{
-            "predicates": [{"equals": {"path": "/health"}}],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"status\":\"ok\"}"}}]
-        }]
-    }' > /dev/null
-
-    # Mountebank
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6001,
-        "protocol": "http",
-        "name": "Health Check",
-        "stubs": [{
-            "predicates": [{"equals": {"path": "/health"}}],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"status\":\"ok\"}"}}]
-        }]
-    }' > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    local json='{"port":6001,"protocol":"http","name":"Health Check","stubs":[{"predicates":[{"equals":{"path":"/health"}}],"responses":[{"is":{"statusCode":200,"body":"{\"status\":\"ok\"}"}}]}]}'
+    local rift_resp=$(create_imposter "$RIFT_ADMIN" "$json")
+    local mb_resp=$(create_imposter "$MB_ADMIN" "$json")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # ========== 2. JSONPath Predicate (port 6002/16002) ==========
     echo -n "  Creating JSONPath imposter... "
-
-    # Rift
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6002,
-        "protocol": "http",
-        "name": "JSONPath Benchmark",
-        "stubs": [{
-            "predicates": [{
-                "equals": {"body": "premium"},
-                "jsonpath": {"selector": "$.user.subscription.plan"}
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"access\":\"granted\"}"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 403, "body": "{\"access\":\"denied\"}"}}]
-        }]
-    }' > /dev/null
-
-    # Mountebank
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6002,
-        "protocol": "http",
-        "name": "JSONPath Benchmark",
-        "stubs": [{
-            "predicates": [{
-                "equals": {"body": "premium"},
-                "jsonpath": {"selector": "$.user.subscription.plan"}
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"access\":\"granted\"}"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 403, "body": "{\"access\":\"denied\"}"}}]
-        }]
-    }' > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    json='{"port":6002,"protocol":"http","name":"JSONPath Benchmark","stubs":[{"predicates":[{"equals":{"body":"premium"},"jsonpath":{"selector":"$.user.subscription.plan"}}],"responses":[{"is":{"statusCode":200,"body":"{\"access\":\"granted\"}"}}]},{"responses":[{"is":{"statusCode":403,"body":"{\"access\":\"denied\"}"}}]}]}'
+    rift_resp=$(create_imposter "$RIFT_ADMIN" "$json")
+    mb_resp=$(create_imposter "$MB_ADMIN" "$json")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # ========== 3. XPath Predicate (port 6003/16003) ==========
     echo -n "  Creating XPath imposter... "
-
-    # Rift
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6003,
-        "protocol": "http",
-        "name": "XPath Benchmark",
-        "stubs": [{
-            "predicates": [{
-                "equals": {"body": "active"},
-                "xpath": {"selector": "//user/status"}
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "<response><result>success</result></response>"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 400, "body": "<response><result>invalid</result></response>"}}]
-        }]
-    }' > /dev/null
-
-    # Mountebank
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6003,
-        "protocol": "http",
-        "name": "XPath Benchmark",
-        "stubs": [{
-            "predicates": [{
-                "equals": {"body": "active"},
-                "xpath": {"selector": "//user/status"}
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "<response><result>success</result></response>"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 400, "body": "<response><result>invalid</result></response>"}}]
-        }]
-    }' > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    json='{"port":6003,"protocol":"http","name":"XPath Benchmark","stubs":[{"predicates":[{"equals":{"body":"active"},"xpath":{"selector":"//user/status"}}],"responses":[{"is":{"statusCode":200,"body":"<response><result>success</result></response>"}}]},{"responses":[{"is":{"statusCode":400,"body":"<response><result>invalid</result></response>"}}]}]}'
+    rift_resp=$(create_imposter "$RIFT_ADMIN" "$json")
+    mb_resp=$(create_imposter "$MB_ADMIN" "$json")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     # ========== 4. Complex AND/OR Predicate (port 6004/16004) ==========
     echo -n "  Creating complex AND/OR imposter... "
+    json='{"port":6004,"protocol":"http","name":"Complex AND/OR","stubs":[{"predicates":[{"and":[{"equals":{"method":"POST"}},{"or":[{"contains":{"path":"/api/v1"}},{"contains":{"path":"/api/v2"}}]},{"or":[{"contains":{"body":"premium"}},{"contains":{"body":"enterprise"}}]},{"exists":{"headers":{"Authorization":true}}}]}],"responses":[{"is":{"statusCode":200,"body":"{\"matched\":\"complex\"}"}}]},{"responses":[{"is":{"statusCode":400,"body":"{\"matched\":\"fallback\"}"}}]}]}'
+    rift_resp=$(create_imposter "$RIFT_ADMIN" "$json")
+    mb_resp=$(create_imposter "$MB_ADMIN" "$json")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
-    # Rift
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6004,
-        "protocol": "http",
-        "name": "Complex AND/OR",
-        "stubs": [{
-            "predicates": [{
-                "and": [
-                    {"equals": {"method": "POST"}},
-                    {"or": [
-                        {"contains": {"path": "/api/v1"}},
-                        {"contains": {"path": "/api/v2"}}
-                    ]},
-                    {"or": [
-                        {"contains": {"body": "\"type\":\"premium\""}},
-                        {"contains": {"body": "\"type\":\"enterprise\""}}
-                    ]},
-                    {"exists": {"headers": {"Authorization": true}}}
-                ]
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"matched\":\"complex\"}"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 400, "body": "{\"matched\":\"fallback\"}"}}]
-        }]
-    }' > /dev/null
-
-    # Mountebank
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d '{
-        "port": 6004,
-        "protocol": "http",
-        "name": "Complex AND/OR",
-        "stubs": [{
-            "predicates": [{
-                "and": [
-                    {"equals": {"method": "POST"}},
-                    {"or": [
-                        {"contains": {"path": "/api/v1"}},
-                        {"contains": {"path": "/api/v2"}}
-                    ]},
-                    {"or": [
-                        {"contains": {"body": "\"type\":\"premium\""}},
-                        {"contains": {"body": "\"type\":\"enterprise\""}}
-                    ]},
-                    {"exists": {"headers": {"Authorization": true}}}
-                ]
-            }],
-            "responses": [{"is": {"statusCode": 200, "body": "{\"matched\":\"complex\"}"}}]
-        }, {
-            "responses": [{"is": {"statusCode": 400, "body": "{\"matched\":\"fallback\"}"}}]
-        }]
-    }' > /dev/null
-    echo -e "${GREEN}OK${NC}"
-
-    # ========== 5. Last Stub Match - 50 Stubs (port 6005/16005) ==========
+    # ========== 5. Last Stub Match - 50 stubs (port 6005/16005) ==========
     echo -n "  Creating 50-stub imposter (last match)... "
-
-    # Generate 50 stubs - only the last one will match our test request
     local stubs=""
     for i in $(seq 1 49); do
-        stubs="$stubs{\"predicates\":[{\"equals\":{\"path\":\"/stub-$i\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"stub-$i\"}}]},"
+        stubs="$stubs{\"predicates\":[{\"equals\":{\"path\":\"/nomatch-$i\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"stub-$i\"}}]},"
     done
-    # Last stub matches our test path
-    stubs="$stubs{\"predicates\":[{\"equals\":{\"path\":\"/last-stub\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"last-stub-matched\"}}]}"
-
-    # Rift
-    curl -s -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{
-        \"port\": 6005,
-        \"protocol\": \"http\",
-        \"name\": \"50 Stubs - Last Match\",
-        \"stubs\": [$stubs]
-    }" > /dev/null
-
-    # Mountebank
-    curl -s -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{
-        \"port\": 6005,
-        \"protocol\": \"http\",
-        \"name\": \"50 Stubs - Last Match\",
-        \"stubs\": [$stubs]
-    }" > /dev/null
-    echo -e "${GREEN}OK${NC}"
+    stubs="$stubs{\"predicates\":[{\"equals\":{\"path\":\"/target\"}}],\"responses\":[{\"is\":{\"statusCode\":200,\"body\":\"matched-last\"}}]}"
+    json="{\"port\":6005,\"protocol\":\"http\",\"name\":\"Last Stub Match\",\"stubs\":[$stubs]}"
+    rift_resp=$(create_imposter "$RIFT_ADMIN" "$json")
+    mb_resp=$(create_imposter "$MB_ADMIN" "$json")
+    if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED (Rift: $rift_resp, MB: $mb_resp)${NC}"
+    fi
 
     echo -e "${GREEN}All imposters created${NC}"
 }
 
-benchmark_health_check() {
-    print_header "1. Simple Health Check (GET /health)"
-    echo ""
-    echo "Testing: Simple equals predicate on path"
-    echo "Requests: $REQUESTS | Concurrency: $CONCURRENCY"
-    echo ""
+run_all_benchmarks() {
+    # Create test body files
+    local jsonpath_body="/tmp/bench_jsonpath.json"
+    echo '{"user":{"name":"Test","subscription":{"plan":"premium"}}}' > "$jsonpath_body"
 
-    echo -n "Benchmarking Rift (port 6001)... "
-    local rift_result=$(run_benchmark "rift" "http://127.0.0.1:6001/health" "GET" "")
+    local xpath_body="/tmp/bench_xpath.xml"
+    echo '<?xml version="1.0"?><root><user><name>Test</name><status>active</status></user></root>' > "$xpath_body"
+
+    local complex_body="/tmp/bench_complex.json"
+    echo '{"type":"premium","data":"test"}' > "$complex_body"
+
+    # Results storage
+    local results=""
+
+    # 1. Health Check
+    print_header "1. HEALTH CHECK (Simple Equals)"
+    echo ""
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    local rift_result=$(run_benchmark "health" "http://127.0.0.1:6001/health" "GET" "")
     local rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
-    local rift_failed=$(echo "$rift_result" | cut -d'|' -f2)
     local rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
-    echo -e "${GREEN}$rift_rps req/sec${NC} (latency: ${rift_latency}ms, failed: $rift_failed)"
-
-    echo -n "Benchmarking Mountebank (port 16001)... "
-    local mb_result=$(run_benchmark "mb" "http://127.0.0.1:16001/health" "GET" "")
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    local mb_result=$(run_benchmark "health" "http://127.0.0.1:16001/health" "GET" "")
     local mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
-    local mb_failed=$(echo "$mb_result" | cut -d'|' -f2)
     local mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
-    echo -e "${YELLOW}$mb_rps req/sec${NC} (latency: ${mb_latency}ms, failed: $mb_failed)"
-
+    echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
     if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
-        local speedup=$(echo "scale=1; $rift_rps / $mb_rps" | bc)
-        echo ""
-        echo -e "  ${CYAN}Rift is ${GREEN}${speedup}x faster${NC}"
-    fi
-}
-
-benchmark_jsonpath() {
-    print_header "2. JSONPath Predicate"
-    echo ""
-    echo "Testing: JSONPath selector \$.user.subscription.plan"
-    echo "Requests: $REQUESTS | Concurrency: $CONCURRENCY"
-    echo ""
-
-    # Create test body
-    local body_file="/tmp/jsonpath_bench.json"
-    cat > "$body_file" << 'EOF'
-{
-    "user": {
-        "id": 12345,
-        "name": "Test User",
-        "subscription": {
-            "plan": "premium",
-            "expires": "2026-12-31"
-        }
-    }
-}
-EOF
-
-    echo -n "Benchmarking Rift (port 6002)... "
-    local rift_result=$(run_benchmark "rift" "http://127.0.0.1:6002/" "POST" "$body_file")
-    local rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
-    local rift_failed=$(echo "$rift_result" | cut -d'|' -f2)
-    local rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
-    echo -e "${GREEN}$rift_rps req/sec${NC} (latency: ${rift_latency}ms, failed: $rift_failed)"
-
-    echo -n "Benchmarking Mountebank (port 16002)... "
-    local mb_result=$(run_benchmark "mb" "http://127.0.0.1:16002/" "POST" "$body_file")
-    local mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
-    local mb_failed=$(echo "$mb_result" | cut -d'|' -f2)
-    local mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
-    echo -e "${YELLOW}$mb_rps req/sec${NC} (latency: ${mb_latency}ms, failed: $mb_failed)"
-
-    if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
-        local speedup=$(echo "scale=1; $rift_rps / $mb_rps" | bc)
-        echo ""
-        echo -e "  ${CYAN}Rift is ${GREEN}${speedup}x faster${NC}"
+        local speedup=$((rift_rps / mb_rps))
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${speedup}x faster${NC}"
+        results="$results|health:$rift_rps:$mb_rps:$speedup"
     fi
 
-    rm -f "$body_file"
-}
-
-benchmark_xpath() {
-    print_header "3. XPath Predicate"
+    # 2. JSONPath
+    print_header "2. JSONPATH PREDICATE"
     echo ""
-    echo "Testing: XPath selector //user/status"
-    echo "Requests: $REQUESTS | Concurrency: $CONCURRENCY"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_result=$(run_benchmark "jsonpath" "http://127.0.0.1:6002/" "POST" "$jsonpath_body")
+    rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
+    rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
     echo ""
-
-    # Create test body
-    local body_file="/tmp/xpath_bench.xml"
-    cat > "$body_file" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<request>
-    <user>
-        <id>12345</id>
-        <name>Test User</name>
-        <status>active</status>
-    </user>
-</request>
-EOF
-
-    echo -n "Benchmarking Rift (port 6003)... "
-    local rift_result=$(run_benchmark "rift" "http://127.0.0.1:6003/" "POST" "$body_file" "application/xml")
-    local rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
-    local rift_failed=$(echo "$rift_result" | cut -d'|' -f2)
-    local rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
-    echo -e "${GREEN}$rift_rps req/sec${NC} (latency: ${rift_latency}ms, failed: $rift_failed)"
-
-    echo -n "Benchmarking Mountebank (port 16003)... "
-    local mb_result=$(run_benchmark "mb" "http://127.0.0.1:16003/" "POST" "$body_file" "application/xml")
-    local mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
-    local mb_failed=$(echo "$mb_result" | cut -d'|' -f2)
-    local mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
-    echo -e "${YELLOW}$mb_rps req/sec${NC} (latency: ${mb_latency}ms, failed: $mb_failed)"
-
+    echo -e "  ${BOLD}Mountebank${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_result=$(run_benchmark "jsonpath" "http://127.0.0.1:16002/" "POST" "$jsonpath_body")
+    mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
+    mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
     if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
-        local speedup=$(echo "scale=1; $rift_rps / $mb_rps" | bc)
-        echo ""
-        echo -e "  ${CYAN}Rift is ${GREEN}${speedup}x faster${NC}"
+        speedup=$((rift_rps / mb_rps))
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${speedup}x faster${NC}"
+        results="$results|jsonpath:$rift_rps:$mb_rps:$speedup"
     fi
 
-    rm -f "$body_file"
-}
-
-benchmark_complex_and_or() {
-    print_header "4. Complex AND/OR Predicates"
+    # 3. XPath
+    print_header "3. XPATH PREDICATE"
     echo ""
-    echo "Testing: AND(method, OR(path), OR(body), exists(header))"
-    echo "Requests: $REQUESTS | Concurrency: $CONCURRENCY"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_result=$(run_benchmark "xpath" "http://127.0.0.1:6003/" "POST" "$xpath_body" "application/xml")
+    rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
+    rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
     echo ""
-
-    # Create test body
-    local body_file="/tmp/complex_bench.json"
-    cat > "$body_file" << 'EOF'
-{
-    "type": "premium",
-    "data": "test payload"
-}
-EOF
-
-    echo -n "Benchmarking Rift (port 6004)... "
-    local rift_result=$(ab -n $REQUESTS -c $CONCURRENCY -p "$body_file" -T "application/json" -H "Authorization: Bearer token123" "http://127.0.0.1:6004/api/v1/resource" 2>&1)
-    local rift_rps=$(echo "$rift_result" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    local rift_failed=$(echo "$rift_result" | grep "Failed requests" | awk '{print $3}')
-    local rift_latency=$(echo "$rift_result" | grep "Time per request:" | head -1 | awk '{print $4}')
-    echo -e "${GREEN}$rift_rps req/sec${NC} (latency: ${rift_latency}ms, failed: $rift_failed)"
-
-    echo -n "Benchmarking Mountebank (port 16004)... "
-    local mb_result=$(ab -n $REQUESTS -c $CONCURRENCY -p "$body_file" -T "application/json" -H "Authorization: Bearer token123" "http://127.0.0.1:16004/api/v1/resource" 2>&1)
-    local mb_rps=$(echo "$mb_result" | grep "Requests per second" | awk '{print $4}' | cut -d. -f1)
-    local mb_failed=$(echo "$mb_result" | grep "Failed requests" | awk '{print $3}')
-    local mb_latency=$(echo "$mb_result" | grep "Time per request:" | head -1 | awk '{print $4}')
-    echo -e "${YELLOW}$mb_rps req/sec${NC} (latency: ${mb_latency}ms, failed: $mb_failed)"
-
+    echo -e "  ${BOLD}Mountebank${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_result=$(run_benchmark "xpath" "http://127.0.0.1:16003/" "POST" "$xpath_body" "application/xml")
+    mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
+    mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
     if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
-        local speedup=$(echo "scale=1; $rift_rps / $mb_rps" | bc)
-        echo ""
-        echo -e "  ${CYAN}Rift is ${GREEN}${speedup}x faster${NC}"
+        speedup=$((rift_rps / mb_rps))
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${speedup}x faster${NC}"
+        results="$results|xpath:$rift_rps:$mb_rps:$speedup"
     fi
 
-    rm -f "$body_file"
-}
-
-benchmark_last_stub() {
-    print_header "5. Last Stub Match (50 Stubs)"
+    # 4. Complex AND/OR
+    print_header "4. COMPLEX AND/OR"
     echo ""
-    echo "Testing: Request matches stub #50 out of 50 (worst case)"
-    echo "Requests: $REQUESTS | Concurrency: $CONCURRENCY"
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_result=$(run_benchmark "complex" "http://127.0.0.1:6004/api/v1/test" "POST" "$complex_body")
+    rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
+    rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
     echo ""
-
-    echo -n "Benchmarking Rift (port 6005)... "
-    local rift_result=$(run_benchmark "rift" "http://127.0.0.1:6005/last-stub" "GET" "")
-    local rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
-    local rift_failed=$(echo "$rift_result" | cut -d'|' -f2)
-    local rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
-    echo -e "${GREEN}$rift_rps req/sec${NC} (latency: ${rift_latency}ms, failed: $rift_failed)"
-
-    echo -n "Benchmarking Mountebank (port 16005)... "
-    local mb_result=$(run_benchmark "mb" "http://127.0.0.1:16005/last-stub" "GET" "")
-    local mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
-    local mb_failed=$(echo "$mb_result" | cut -d'|' -f2)
-    local mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
-    echo -e "${YELLOW}$mb_rps req/sec${NC} (latency: ${mb_latency}ms, failed: $mb_failed)"
-
+    echo -e "  ${BOLD}Mountebank${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_result=$(run_benchmark "complex" "http://127.0.0.1:16004/api/v1/test" "POST" "$complex_body")
+    mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
+    mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
     if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
-        local speedup=$(echo "scale=1; $rift_rps / $mb_rps" | bc)
-        echo ""
-        echo -e "  ${CYAN}Rift is ${GREEN}${speedup}x faster${NC}"
+        speedup=$((rift_rps / mb_rps))
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${speedup}x faster${NC}"
+        results="$results|complex:$rift_rps:$mb_rps:$speedup"
     fi
+
+    # 5. Last Stub Match (50 stubs)
+    print_header "5. LAST STUB MATCH (50 stubs)"
+    echo ""
+    echo -e "  ${BOLD}Rift${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    rift_result=$(run_benchmark "laststub" "http://127.0.0.1:6005/target" "GET" "")
+    rift_rps=$(echo "$rift_result" | cut -d'|' -f1)
+    rift_latency=$(echo "$rift_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${GREEN}${BOLD}$rift_rps${NC}"
+    echo -e "    Latency:      ${GREEN}${rift_latency}ms${NC}"
+    echo ""
+    echo -e "  ${BOLD}Mountebank${NC} ($REQUESTS requests, $CONCURRENCY concurrent):"
+    mb_result=$(run_benchmark "laststub" "http://127.0.0.1:16005/target" "GET" "")
+    mb_rps=$(echo "$mb_result" | cut -d'|' -f1)
+    mb_latency=$(echo "$mb_result" | cut -d'|' -f3)
+    echo -e "    Requests/sec: ${YELLOW}$mb_rps${NC}"
+    echo -e "    Latency:      ${YELLOW}${mb_latency}ms${NC}"
+    if [ -n "$rift_rps" ] && [ -n "$mb_rps" ] && [ "$mb_rps" -gt 0 ] 2>/dev/null; then
+        speedup=$((rift_rps / mb_rps))
+        echo -e "  ${CYAN}>>> Speedup: ${GREEN}${BOLD}${speedup}x faster${NC}"
+        results="$results|laststub:$rift_rps:$mb_rps:$speedup"
+    fi
+
+    # Cleanup temp files
+    rm -f "$jsonpath_body" "$xpath_body" "$complex_body"
+
+    # Print summary
+    print_header "SUMMARY"
+    echo ""
+    echo "┌─────────────────────────┬────────────┬────────────┬──────────┐"
+    echo "│ Scenario                │ Rift       │ Mountebank │ Speedup  │"
+    echo "├─────────────────────────┼────────────┼────────────┼──────────┤"
+
+    # Parse results
+    IFS='|' read -ra PARTS <<< "$results"
+    for part in "${PARTS[@]}"; do
+        if [ -n "$part" ]; then
+            IFS=':' read -ra DATA <<< "$part"
+            name="${DATA[0]}"
+            rift="${DATA[1]}"
+            mb="${DATA[2]}"
+            spd="${DATA[3]}"
+            case "$name" in
+                health) printf "│ 1. Health Check         │ %7s/s  │ %7s/s  │  ${GREEN}%5sx${NC}   │\n" "$rift" "$mb" "$spd" ;;
+                jsonpath) printf "│ 2. JSONPath             │ %7s/s  │ %7s/s  │  ${GREEN}%5sx${NC}   │\n" "$rift" "$mb" "$spd" ;;
+                xpath) printf "│ 3. XPath                │ %7s/s  │ %7s/s  │  ${GREEN}%5sx${NC}   │\n" "$rift" "$mb" "$spd" ;;
+                complex) printf "│ 4. Complex AND/OR       │ %7s/s  │ %7s/s  │  ${GREEN}%5sx${NC}   │\n" "$rift" "$mb" "$spd" ;;
+                laststub) printf "│ 5. Last Stub (50)       │ %7s/s  │ %7s/s  │  ${GREEN}%5sx${NC}   │\n" "$rift" "$mb" "$spd" ;;
+            esac
+        fi
+    done
+    echo "└─────────────────────────┴────────────┴────────────┴──────────┘"
 }
 
-print_summary() {
-    print_header "BENCHMARK SUMMARY"
+final_cleanup() {
     echo ""
-    echo "Configuration: $REQUESTS requests, $CONCURRENCY concurrent connections"
-    echo ""
-    echo "┌────────────────────────────┬────────────┬────────────┬──────────┐"
-    echo "│ Scenario                   │ Rift       │ Mountebank │ Speedup  │"
-    echo "├────────────────────────────┼────────────┼────────────┼──────────┤"
-    printf "│ %-26s │ %10s │ %10s │ %8s │\n" "1. Health Check" "$HEALTH_RIFT" "$HEALTH_MB" "${HEALTH_SPEEDUP}x"
-    printf "│ %-26s │ %10s │ %10s │ %8s │\n" "2. JSONPath" "$JSONPATH_RIFT" "$JSONPATH_MB" "${JSONPATH_SPEEDUP}x"
-    printf "│ %-26s │ %10s │ %10s │ %8s │\n" "3. XPath" "$XPATH_RIFT" "$XPATH_MB" "${XPATH_SPEEDUP}x"
-    printf "│ %-26s │ %10s │ %10s │ %8s │\n" "4. Complex AND/OR" "$COMPLEX_RIFT" "$COMPLEX_MB" "${COMPLEX_SPEEDUP}x"
-    printf "│ %-26s │ %10s │ %10s │ %8s │\n" "5. Last Stub (50)" "$LASTSTUB_RIFT" "$LASTSTUB_MB" "${LASTSTUB_SPEEDUP}x"
-    echo "└────────────────────────────┴────────────┴────────────┴──────────┘"
-    echo ""
-}
-
-cleanup_imposters() {
-    echo ""
-    echo "Cleaning up benchmark imposters..."
+    echo "Cleaning up..."
     for port in 6001 6002 6003 6004 6005; do
         curl -s -X DELETE "$RIFT_ADMIN/imposters/$port" > /dev/null 2>&1 || true
         curl -s -X DELETE "$MB_ADMIN/imposters/$port" > /dev/null 2>&1 || true
     done
-    echo "Done."
 }
 
 # Main
 check_ab
 
-# Check servers
 if ! curl -s "$RIFT_ADMIN/imposters" > /dev/null 2>&1; then
-    echo -e "${RED}Error: Rift is not running on port 2525${NC}"
-    echo "Start with: docker-compose up rift -d"
+    echo -e "${RED}Error: Rift not running. Start with: docker-compose up rift -d${NC}"
     exit 1
 fi
 
 if ! curl -s "$MB_ADMIN/" > /dev/null 2>&1; then
-    echo -e "${RED}Error: Mountebank is not running on port 3525${NC}"
-    echo "Start with: docker-compose up mountebank -d"
+    echo -e "${RED}Error: Mountebank not running. Start with: docker-compose up mountebank -d${NC}"
     exit 1
 fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     COMPREHENSIVE RIFT vs MOUNTEBANK BENCHMARK               ║${NC}"
-echo -e "${CYAN}║     Requests: $REQUESTS | Concurrency: $CONCURRENCY                          ║${NC}"
+echo -e "${CYAN}║     ${BOLD}COMPREHENSIVE BENCHMARK${NC}${CYAN}                                   ║${NC}"
+echo -e "${CYAN}║                                                              ║${NC}"
+echo -e "${CYAN}║     Requests: $REQUESTS | Concurrency: $CONCURRENCY                        ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-setup_imposters
-
-# Run benchmarks and capture results
-benchmark_health_check
-benchmark_jsonpath
-benchmark_xpath
-benchmark_complex_and_or
-benchmark_last_stub
-
 cleanup_imposters
+setup_imposters
+run_all_benchmarks
+final_cleanup
 
 echo ""
 echo -e "${GREEN}Benchmarks complete!${NC}"
