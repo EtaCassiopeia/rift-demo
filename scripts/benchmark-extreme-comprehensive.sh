@@ -129,11 +129,15 @@ setup_imposters() {
     echo -e "${CYAN}Setting up imposters with $STUBS stubs each...${NC}"
     echo ""
 
+    # Temp file for JSON payloads (avoids shell escaping issues)
+    local tmpfile="/tmp/rift_imposter_$$.json"
+
     # 1. Simple
     echo -n "  1. Simple equals ($STUBS stubs)... "
     local simple_stubs=$(generate_stubs_simple $STUBS "/health")
-    local rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}")
-    local mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}")
+    echo "{\"port\":7001,\"protocol\":\"http\",\"stubs\":[$simple_stubs]}" > "$tmpfile"
+    local rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    local mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
     if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -143,8 +147,9 @@ setup_imposters() {
     # 2. JSONPath
     echo -n "  2. JSONPath ($STUBS stubs × 2 predicates)... "
     local jsonpath_stubs=$(generate_stubs_jsonpath $STUBS)
-    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}")
-    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}")
+    echo "{\"port\":7002,\"protocol\":\"http\",\"stubs\":[$jsonpath_stubs]}" > "$tmpfile"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
     if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -154,8 +159,9 @@ setup_imposters() {
     # 3. XPath
     echo -n "  3. XPath ($STUBS stubs × 2 predicates)... "
     local xpath_stubs=$(generate_stubs_xpath $STUBS)
-    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}")
-    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}")
+    echo "{\"port\":7003,\"protocol\":\"http\",\"stubs\":[$xpath_stubs]}" > "$tmpfile"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
     if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -165,8 +171,9 @@ setup_imposters() {
     # 4. Complex AND/OR
     echo -n "  4. Complex AND/OR ($STUBS stubs × 3 predicates)... "
     local complex_stubs=$(generate_stubs_complex $STUBS)
-    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}")
-    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}")
+    echo "{\"port\":7004,\"protocol\":\"http\",\"stubs\":[$complex_stubs]}" > "$tmpfile"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
     if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -176,8 +183,9 @@ setup_imposters() {
     # 5. Regex
     echo -n "  5. Regex ($STUBS stubs × 2 predicates)... "
     local regex_stubs=$(generate_stubs_regex $STUBS)
-    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}")
-    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}")
+    echo "{\"port\":7005,\"protocol\":\"http\",\"stubs\":[$regex_stubs]}" > "$tmpfile"
+    rift_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$RIFT_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
+    mb_resp=$(curl -s -w "%{http_code}" -o /dev/null -X POST "$MB_ADMIN/imposters" -H "Content-Type: application/json" -d @"$tmpfile")
     if [ "$rift_resp" = "201" ] && [ "$mb_resp" = "201" ]; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -185,6 +193,9 @@ setup_imposters() {
     fi
 
     echo -e "${GREEN}All imposters created${NC}"
+
+    # Clean up temp file
+    rm -f "$tmpfile"
 
     # Verify imposters are responding
     echo ""
