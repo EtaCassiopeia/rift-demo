@@ -48,6 +48,22 @@ services:
       timeout: 3s
       retries: 3
 
+  # WireMock - Another Mock Server (for comparison)
+  wiremock:
+    image: wiremock/wiremock:3.10.0
+    container_name: wiremock-demo
+    ports:
+      - "8080:8080"       # Main API port
+      - "8443:8443"       # HTTPS port
+    volumes:
+      - ./wiremock:/home/wiremock:ro
+    command: ["--global-response-templating", "--disable-request-logging", "--no-request-journal", "--async-response-enabled=true", "--container-threads=200"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/__admin/mappings"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
   # Echo Server - For proxy recording demo
   echo:
     image: python:3.11-slim
