@@ -15,8 +15,12 @@ MB_ADMIN="http://127.0.0.1:3525"
 STUBS=${STUBS:-300}
 REQUESTS=${REQUESTS:-2000}
 CONCURRENCY=${CONCURRENCY:-200}
-# MB_REQUESTS must be >= CONCURRENCY (ab requirement)
+# MB_REQUESTS: Mountebank requests (defaults to CONCURRENCY, must be >= CONCURRENCY)
+# Override with: MB_REQUESTS=500 ./benchmark-extreme-comprehensive.sh
 MB_REQUESTS=${MB_REQUESTS:-$CONCURRENCY}
+if [ "$MB_REQUESTS" -lt "$CONCURRENCY" ]; then
+    MB_REQUESTS=$CONCURRENCY
+fi
 
 # Check for --no-color flag
 NO_COLOR=false
